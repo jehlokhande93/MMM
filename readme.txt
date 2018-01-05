@@ -1,3 +1,7 @@
+NOTE: Dataset cannot be shared publicly. However the structure of the data is described in the report PDF. 
+
+There are 3 scripts that need to be run before generating insights. Once the initial 2 scripts have been run, further runs of only the third mentioned script (Model-PE-9855.rmd) need to be done
+
 DataCleaning.py
 
 This file needs to be run only when you have the original dataset with all the columns.
