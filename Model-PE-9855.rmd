@@ -1,0 +1,358 @@
+---
+title: "Project Data Analysis"
+author: "Jeh"
+date: "December 4, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#library('xlsx')
+library('glmnet')
+library('MASS')
+library('corrplot')
+library('car')
+library('ggfortify')
+library('grid')
+library('gridExtra')
+library('gplots')
+setwd('C:\\Users\\Jeh\\Desktop\\Course Stuff\\ISYE6416 - Regression\\Project')
+
+rm(list=ls())
+
+original_data = read.csv('PE03_200039855.csv', header = TRUE)
+
+head(original_data)
+```
+```{r}
+#original_data$Real.Demanded.units=log(original_data$Real.Demanded.units)
+original_data$Offer.type=as.factor(original_data$Offer.type)
+original_data$Discover=as.factor(original_data$Discover)
+original_data$Set.Flag=as.factor(original_data$Set.Flag)
+original_data$Model.Photo=as.factor(original_data$Model.Photo)
+original_data$Main.Offer=as.factor(original_data$Main.Offer)
+
+attach(original_data)
+
+plot(as.factor(Offer.type), Real.Demanded.units) #quite some variation
+plot(as.factor(Exposition.Percentaje), Real.Demanded.units) #qonly 1 value. remove column?
+plot(as.factor(Discover), Real.Demanded.units)
+plot(as.factor(Set.Flag), Real.Demanded.units)  
+plot(as.factor(Model.Photo), Real.Demanded.units) #not too much diff
+plot(as.factor(Main.Offer), Real.Demanded.units) #not too much variation
+plot(as.factor(Page.number), Real.Demanded.units) #quite some variation
+
+plot(Discount, Real.Demanded.units)# increasing non-linear trend. Cant figure out relationship between units and discount
+plot(Regular.Price.Local.Currency, Real.Demanded.units)
+plot(Sale.Price.Local.Currency, Real.Demanded.units)#slight decreasing trend
+
+scatterplotMatrix(~ Model.Photo + Main.Offer + Page.number ,data = original_data, smooth = FALSE)
+scatterplotMatrix(~ Offer.type + Discover + Exposition.Percentaje + Set.Flag,data = original_data, smooth = FALSE)
+
+scatterplotMatrix(~ Regular.Price.Local.Currency + Sale.Price.Local.Currency + Discount,data = original_data, smooth = FALSE)
+
+#Remove columns that have only 1 value
+original_data = subset(original_data, select= -c(CUC.Code, Center, Offer.type))
+
+
+#Getting the testing set
+set.seed(411)
+
+proportion_test = 0.20
+
+samplesize <- round(length(original_data[,1])*proportion_test)
+indexsample <- sample(1:length(original_data[,1]), size = samplesize, replace=FALSE)
+
+#Preparing the data sets
+testing <- original_data[indexsample,]
+original_data <- original_data[-indexsample,]
+
+
+```
+
+Correlation Matrix
+```{r}
+
+X = model.matrix(lm(Real.Demanded.units ~ ., data = original_data))[,-1]
+#Construct the model matrix of predictors
+X = cbind(original_data$Real.Demanded.units, X) #attach sale price to predictors
+corrplot(cor(X), tl.cex = 0.5, tl.col = 'black') #product correlation plot
+
+```
+
+
+
+There are pretty high correlation values between predictors, as seen from the above correlation plot. 
+(Note: This analysis will be different for different country-product combinations)
+
+High correlations: Discount and sales price, regular price and number of real orders.
+
+Initial Model
+```{r}
+model1 = lm(Real.Demanded.units~.,data=original_data)
+summary(model1)
+```
+
+```{r}
+
+resid <- model1$residuals
+cook = cooks.distance(model1)
+
+#Plotting the residuals
+par(mfrow =c(2,2))
+plot(model1$fitted.values, model1$residuals, xlab="Fitted Values",ylab="Residuals")
+abline(0,0,col="red")
+qqPlot(model1$residuals, ylab="Residuals", main = "")
+hist(model1$residuals, xlab="Residuals", main = "",nclass=10,col="orange")
+plot(cook,type="h",lwd=3,col="red", ylab = "Cook's Distance")
+```
+The residuals do not show constant variance, we will hence transform the response variable using a log transformation to account for this.
+
+```{r, warning=FALSE}
+original_data$Real.Demanded.units=log(original_data$Real.Demanded.units)
+testing$Real.Demanded.units = log(testing$Real.Demanded.units)
+detach(original_data)
+attach(original_data)
+```
+
+Plot basic linear model after log transformation of the response
+
+```{r}
+model2 = lm(Real.Demanded.units~.,data=original_data)
+summary(model2)
+```
+Residual Analysis
+
+```{r}
+resid <- model2$residuals
+cook = cooks.distance(model2)
+
+#Plotting the residuals
+par(mfrow =c(2,2))
+plot(model2$fitted.values, model2$residuals, xlab="Fitted Values",ylab="Residuals")
+abline(0,0,col="red")
+qqPlot(model2$residuals, ylab="Residuals", main = "")
+hist(model2$residuals, xlab="Residuals", main = "",nclass=10,col="orange")
+plot(cook,type="h",lwd=3,col="red", ylab = "Cook's Distance")
+```
+The residual now does not show a pattern in variance, however there are some obvious outliers in the data, which we will now remove
+
+```{r}
+cooks = cooks.distance(model2)
+#plot(cooks)
+dist=4/nrow(original_data)
+outliers=cooks[which(cooks>dist)]
+outlier_index = as.numeric(names(outliers))
+data_wo_outliers = original_data[-c(outlier_index),]
+#detach(original_data)
+attach(data_wo_outliers)
+```
+
+
+Fit the model using data without outliers.
+Plotting the residual and outlier graphs after removing them
+```{r}
+model3 = lm(Real.Demanded.units~.,data=data_wo_outliers)
+summary(model3)
+
+resid <- model3$residuals
+cook = cooks.distance(model3)
+
+#Plotting the residuals
+par(mfrow =c(2,2))
+plot(model3$fitted.values, model3$residuals, xlab="Fitted Values",ylab="Residuals")
+abline(0,0,col="red")
+qqPlot(model3$residuals, ylab="Residuals", main = "")
+hist(model3$residuals, xlab="Residuals", main = "",nclass=8,col="orange")
+plot(cook,type="h",lwd=3,col="red", ylab = "Cook's Distance")
+```
+
+
+From the corrplot plotted earlier, we observe that some of the variables are correlated. We need to hence select variables to be included in the model. We are using Elastic net to do the same.
+
+Variable selection using the three approaches
+
+```{r}
+#Since we already remove the outliers, we will use the data_wo_outliers as the input for the models using the standardize feature. In case someone needs to prepare the data, the scale method can be used.
+
+scaled_data=data_wo_outliers
+
+X <- model.matrix(~.-1, data_wo_outliers[,colnames(data_wo_outliers)!="Real.Demanded.units"])
+testing_set <- model.matrix(~.-1, testing[,colnames(data_wo_outliers)!="Real.Demanded.units"])
+
+#Getting the lambda values 
+lasso.cv <- cv.glmnet(X,Real.Demanded.units,nfolds = 10,alpha=1, standardize = T)
+elasticnet.cv <- cv.glmnet(X,Real.Demanded.units,nfolds = 10,alpha=0.5, standardize = T)
+ridge.cv <- cv.glmnet(X,Real.Demanded.units,nfolds = 10,alpha=0, standardize = T)
+
+#Getting the models
+lasso <- glmnet(X, scaled_data$Real.Demanded.units,  alpha=1, lambda = lasso.cv$lambda.min, standardize = T)
+elasticnet <- glmnet(X, scaled_data$Real.Demanded.units, alpha=0.5, lambda = elasticnet.cv$lambda.min, standardize = T)
+ridge <- glmnet(X, scaled_data$Real.Demanded.units, alpha=0, lambda = ridge.cv$lambda.min, standardize = T)
+
+#Plotting the results.
+par(mfrow=c(2,2))
+plot(lasso.cv, main = "Lasso");plot(elasticnet.cv, main = "Elastic Net");plot(ridge.cv, main= "Ridge")
+plot(log(lasso.cv$lambda),lasso.cv$cvm,pch=19,col="red",xlab="log(Lambda)",ylab=lasso.cv$name)
+points(log(elasticnet.cv$lambda),elasticnet.cv$cvm,pch=19,col="grey")
+points(log(ridge.cv$lambda),ridge.cv$cvm,pch=19,col="blue")
+title("Comparison")
+legend("topleft",legend=c("Lasso","Elastic Net","Ridge"),pch=19,col=c("red","grey","blue"))
+
+```
+We will calculate the prediction accuracy for all the 3 models above on the training and the test set.
+
+However to give you an idea of the variables selected, we have plotted the beta coefficients of the lasso model.
+
+```{r}
+lasso$beta
+```
+
+
+Residual Analysis for the generated models
+
+Lasso Training Accuracy -----------------------------------------------------
+
+```{r}
+
+traineddata= predict(lasso, X, type = "response")
+TR_MSPE_Lasso = mean((traineddata[,1]-data_wo_outliers$Real.Demanded.units)^2)
+TR_MAE_Lasso = mean(abs(traineddata[,1]-data_wo_outliers$Real.Demanded.units))
+TR_MAPE_Lasso = mean(abs(traineddata[,1]-data_wo_outliers$Real.Demanded.units)/data_wo_outliers$Real.Demanded.units)
+TR_PM_Lasso = sum((traineddata[,1]-data_wo_outliers$Real.Demanded.units)^2)/sum((data_wo_outliers$Real.Demanded.units-mean(data_wo_outliers$Real.Demanded.units))^2)
+
+fitt <- traineddata[,1]
+resid <- data_wo_outliers$Real.Demanded.units - fitt
+
+resulttable <- matrix(round(c(TR_PM_Lasso,TR_MAPE_Lasso,TR_MAE_Lasso,TR_MSPE_Lasso),4)*100, ncol =1, byrow= TRUE)
+colnames(resulttable) <- c("Value (%)")
+rownames(resulttable) <- c("Precision Measure","Mean Average Percentage Error","Mean Absolute Error","Mean Squared Prediction Error")
+
+
+#Plotting the residuals
+par(mfrow =c(2,2))
+plot(fitt, resid, xlab="Fitted Values",ylab="Residuals", main="Fitted Values vs Residuals")
+abline(0,0,col="red")
+qqPlot(resid, ylab="Residuals", main = "QQ- Plot")
+hist(resid, xlab="Residuals", main = "Histogram of Residuals",nclass=10,col="orange")
+#plot(cook,type="h",lwd=3,col="red", ylab = "Cook's Distance")
+
+textplot(resulttable, halign = "center", valign = "top")
+title("Performance Metrics")
+
+```
+
+Elasitcnet Training Accuracy --------------------------------------------
+
+```{r}
+
+traineddata= predict(elasticnet, X, type = "response")
+TR_MSPE_elastic = mean((traineddata[,1]-data_wo_outliers$Real.Demanded.units)^2)
+TR_MAE_elastic = mean(abs(traineddata[,1]-data_wo_outliers$Real.Demanded.units))
+TR_MAPE_elastic = mean(abs(traineddata[,1]-data_wo_outliers$Real.Demanded.units)/data_wo_outliers$Real.Demanded.units)
+TR_PM_elastic = sum((traineddata[,1]-data_wo_outliers$Real.Demanded.units)^2)/sum((data_wo_outliers$Real.Demanded.units-mean(data_wo_outliers$Real.Demanded.units))^2)
+
+fitt <- traineddata[,1]
+resid <- data_wo_outliers$Real.Demanded.units - fitt
+
+resulttable <- matrix(round(c(TR_PM_elastic,TR_MAPE_elastic,TR_MAE_elastic,TR_MSPE_elastic),4)*100, ncol =1, byrow= TRUE)
+colnames(resulttable) <- c("Value (%)")
+rownames(resulttable) <- c("Precision Measure","Mean Average Percentage Error","Mean Absolute Error","Mean Squared Prediction Error")
+
+
+#Plotting the residuals
+par(mfrow =c(2,2))
+plot(fitt, resid, xlab="Fitted Values",ylab="Residuals", main="Fitted Values vs Residuals")
+abline(0,0,col="red")
+qqPlot(resid, ylab="Residuals", main = "QQ- Plot")
+hist(resid, xlab="Residuals", main = "Histogram of Residuals",nclass=10,col="orange")
+#plot(cook,type="h",lwd=3,col="red", ylab = "Cook's Distance")
+
+textplot(resulttable, halign = "center", valign = "top")
+title("Performance Metrics")
+
+
+```
+
+
+Ridge Training Accuracy  --------------------------------------------
+
+```{r}
+
+traineddata= predict(ridge, X, type = "response")
+TR_MSPE_ridge = mean((traineddata[,1]-data_wo_outliers$Real.Demanded.units)^2)
+TR_MAE_ridge = mean(abs(traineddata[,1]-data_wo_outliers$Real.Demanded.units))
+TR_MAPE_ridge = mean(abs(traineddata[,1]-data_wo_outliers$Real.Demanded.units)/data_wo_outliers$Real.Demanded.units)
+TR_PM_ridge = sum((traineddata[,1]-data_wo_outliers$Real.Demanded.units)^2)/sum((data_wo_outliers$Real.Demanded.units-mean(data_wo_outliers$Real.Demanded.units))^2)
+
+
+fitt <- traineddata[,1]
+resid <- data_wo_outliers$Real.Demanded.units - fitt
+
+resulttable <- matrix(round(c(TR_PM_ridge,TR_MAPE_ridge,TR_MAE_ridge,TR_MSPE_ridge),4)*100, ncol =1, byrow= TRUE)
+colnames(resulttable) <- c("Value (%)")
+rownames(resulttable) <- c("Precision Measure","Mean Average Percentage Error","Mean Absolute Error","Mean Squared Prediction Error")
+
+#Plotting the residuals
+par(mfrow =c(2,2))
+plot(fitt, resid, xlab="Fitted Values",ylab="Residuals", main="Fitted Values vs Residuals")
+abline(0,0,col="red")
+qqPlot(resid, ylab="Residuals", main = "QQ- Plot")
+hist(resid, xlab="Residuals", main = "Histogram of the Residuals",nclass=10,col="orange")
+#plot(cook,type="h",lwd=3,col="red", ylab = "Cook's Distance")
+
+textplot(resulttable, halign = "center", valign = "top")
+title("Performance Metrics")
+
+```
+
+To complete the process, let us evaluate the performance of each model with the testing set.
+
+Lasso Testing Accuracy  
+
+```{r}
+
+predicteddata= predict(lasso, testing_set, type = "response")
+TS_MSPE_lasso = mean((predicteddata[,1]-testing[,1])^2)
+TS_MAE_lasso = mean(abs(predicteddata[,1]-testing[,1]))
+TS_MAPE_lasso = mean(abs(predicteddata[,1]-testing[,1])/testing[,1])
+TS_PM_lasso = sum((predicteddata[,1]-testing[,1])^2)/sum((testing[,1]-mean(testing[,1]))^2)
+```
+
+Elasticnet Testing Accuracy  
+
+```{r}
+
+predicteddata= predict(elasticnet, testing_set, type = "response")
+TS_MSPE_elasticnet = mean((predicteddata[,1]-testing[,1])^2)
+TS_MAE_elasticnet = mean(abs(predicteddata[,1]-testing[,1]))
+TS_MAPE_elasticnet = mean(abs(predicteddata[,1]-testing[,1])/testing[,1])
+TS_PM_elasticnet = sum((predicteddata[,1]-testing[,1])^2)/sum((testing[,1]-mean(testing[,1]))^2)
+```
+
+Ridge Testing Accuracy  
+
+```{r}
+
+predicteddata= predict(ridge, testing_set, type = "response")
+TS_MSPE_ridge = mean((predicteddata[,1]-testing[,1])^2)
+TS_MAE_ridge = mean(abs(predicteddata[,1]-testing[,1]))
+TS_MAPE_ridge = mean(abs(predicteddata[,1]-testing[,1])/testing[,1])
+TS_PM_ridge = sum((predicteddata[,1]-testing[,1])^2)/sum((testing[,1]-mean(testing[,1]))^2)
+```
+
+Comparing the result for each model
+
+```{r}
+
+resulttable <- matrix(round(c(TS_PM_lasso,TS_PM_elasticnet,TS_PM_ridge,TS_MAPE_lasso,TS_MAPE_elasticnet, TS_MAPE_ridge, TS_MAE_lasso, TS_MAE_elasticnet, TS_MAE_ridge, TS_MSPE_lasso, TS_MSPE_elasticnet, TS_MSPE_ridge),4)*100, ncol =3, byrow= TRUE)
+
+colnames(resulttable) <- c("Lasso","Elastic Net","Ridge")
+rownames(resulttable) <- c("Precision Measure","Mean Average Percentage Error","Mean Absolute Error","Mean Squared Prediction Error")
+formatted <- tableGrob(resulttable)
+grid.arrange(formatted)
+
+```
